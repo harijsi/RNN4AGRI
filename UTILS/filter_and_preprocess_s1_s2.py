@@ -2,7 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 
 # Define list of classes
-class_list = [1, 2, 3, 11, 12, 15, 16]
+class_list = [1, 2, 3, 11, 12, 15]
 processed_dir = 'processed_datasets/'
 filename = f'Filtered_S1_S2_formatted_{str(class_list)}.csv'
 subset_size = 500
@@ -35,27 +35,13 @@ def process_dataframe(file_name):
     dataframe = dataframe.fillna(value=0, axis=0)
     dataframe['Class_ID'] = dataframe['Class_ID'].astype(int)
 
-    class2idx = {
-            1: 0,
-            2: 1,
-            3: 2,
-            4: 3,
-            5: 4,
-            6: 5,
-            7: 6,
-            8: 7,
-            9: 8,
-            11: 9,
-            12: 10,
-            13: 11,
-            14: 12,
-            15: 13,
-            16: 14,
-            17: 15,
-            18: 16,
-            19: 17,
-            20: 18
-    }
+    class2idx = {}
+    n = 0
+
+    # For partial class usage, translates class names to sequential indices.
+    for item in class_list:
+        class2idx[item] = n
+        n += 1
 
     # full list of class2idx
     # class2idx = {
