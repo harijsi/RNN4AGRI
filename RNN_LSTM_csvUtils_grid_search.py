@@ -18,12 +18,15 @@ from file_utils import FileUtils
 from datetime import datetime
 import os
 from sklearn.model_selection import ParameterGrid
+import torch_optimizer as optim
 
 
-param_grid = {'-learning_rate': [1e-2, 1e-3, 1e-4], '-batch_size': [32, 64, 128],
+param_grid = {'-learning_rate': [1e-2, 1e-3], '-batch_size': [32, 64, 128],
               '-hidden_size': [32, 64, 128], '-num_layers': [1, 2]}
 
 g_id = 0
+num_of_classes = 6
+input_size = 30
 
 for g in tqdm(ParameterGrid(param_grid)):
 
@@ -42,7 +45,7 @@ for g in tqdm(ParameterGrid(param_grid)):
 
     parser.add_argument('-id', default=g_id, type=int)
     parser.add_argument('-run_name', default=f'run_{time.time()}', type=str)
-    parser.add_argument('-sequence_name', default=f'RNN_LSTM_CSV_S1_temp_feat', type=str)
+    parser.add_argument('-sequence_name', default=f'RNN_LSTM_CSV_S1_S2_best_metric_test', type=str)
     parser.add_argument('-learning_rate', default=g_learning_rate, type=float)
     parser.add_argument('-batch_size', default=g_batch_size, type=int)
     parser.add_argument('-epochs', default=1500, type=int)
@@ -66,12 +69,12 @@ for g in tqdm(ParameterGrid(param_grid)):
 
     # Transform labels to one-hot
     def target_to_oh(target):
-        num_class = 2  # hard code here, can do partial
+        num_class = num_of_classes
         one_hot = torch.eye(num_class)[target]
         return one_hot
 
 
-    dataset = 'datasets/Processed_SAR_f_t.csv'
+    dataset = 'datasets/Processed_S1_S2_overfit_[1, 2, 3, 11, 12, 15]].csv'
 
 
     class DatasetTabular(torch.utils.data.Dataset):
@@ -81,9 +84,9 @@ for g in tqdm(ParameterGrid(param_grid)):
             self.sequence_length = sequence_len
             self.data = pd.read_csv(dataset).fillna(value=0, axis=0)
             self.data['Class_ID'] = self.data['Class_ID'].astype(int)
-            self.data_x = self.data.iloc[:, 1:9]
+            self.data_x = self.data.iloc[:, 1:31]
             self.scaler.fit(self.data_x)
-            self.data_y = self.data.iloc[:, 10:11]
+            self.data_y = self.data.iloc[:, 32:33]
 
         def __len__(self):
             return int(len(self.data) / self.sequence_length)
@@ -156,12 +159,10 @@ for g in tqdm(ParameterGrid(param_grid)):
 
             return output
 
-
-    input_size = 8
-
-    model = ModelLSTM(input_size=input_size, hidden_size=args.hidden_size, num_layers=args.num_layers, output_size=2)
+    model = ModelLSTM(input_size=input_size, hidden_size=args.hidden_size, num_layers=args.num_layers,
+                      output_size=num_of_classes)
     loss_func = LossCrossEntropy()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = optim.RAdam(model.parameters(), lr=args.learning_rate)
 
     # if cuda move model and loss function to gpu
     if args.is_cuda:
@@ -171,13 +172,17 @@ for g in tqdm(ParameterGrid(param_grid)):
     metrics = {}
     for stage in ['train', 'test']:
         for metric in [
-            'loss', 'acc'
+            'loss', 'acc',
         ]:
             metrics[f'{stage}_{metric}'] = 0
+        if stage == 'test':
+            metrics[f'best_{stage}_{metric}'] = 0
 
-    max_test_acc = 0
+    # Variables to keep track of
+    best_test_acc = 0.0
+    best_test_loss = ''
     elapsed = 0
-    patience = 100
+    patience = 50
 
     for epoch in range(0, args.epochs):
 
@@ -225,6 +230,34 @@ for g in tqdm(ParameterGrid(param_grid)):
                 metrics_epoch[f'{stage}_loss'].append(loss.item())  # Tensor(0.1) => 0.1f
                 metrics_epoch[f'{stage}_acc'].append(acc.item())
 
+            # Early stopping and keeping track of best metrics
+            if stage == 'test':
+                test_acc = np.mean(metrics_epoch['test_acc'])
+                test_loss = np.mean(metrics_epoch['test_loss'])
+
+                if test_acc > best_test_acc:
+                    best_test_acc = test_acc
+                    elapsed = 0
+                elif test_acc <= best_test_acc and elapsed < patience:
+                    elapsed += 1
+                    pass
+
+                if epoch == 0:
+                    best_test_loss = test_loss
+                elif test_loss < best_test_loss:
+                    best_test_loss = test_loss
+
+                    # Saves model if a better test loss is achieved
+                    torch.save(model.cpu().state_dict(), f'./results/{args.sequence_name}/'
+                                                         f'{args.run_name}/{args.run_name}-model-{epoch}.pt')
+                    model = model.to('cuda')
+
+                metrics['best_test_loss'] = best_test_loss
+                metrics['best_test_acc'] = best_test_acc
+
+                metrics_epoch[f'best_{stage}_loss'] = best_test_loss.item()  # Tensor(0.1) => 0.1f
+                metrics_epoch[f'best_{stage}_acc'] = best_test_acc.item()
+
             metrics_strs = []
 
             for key in metrics_epoch.keys():
@@ -233,23 +266,13 @@ for g in tqdm(ParameterGrid(param_grid)):
                     metrics[key] = value
                     metrics_strs.append(f'{key}: {round(value, 2)}')
 
-            # Early stopping
-            if stage == 'test':
-                test_acc = np.mean(metrics_epoch['test_acc'])
-
-                if test_acc > max_test_acc:
-                    max_test_acc = test_acc
-                    elapsed = 0
-                elif test_acc <= max_test_acc and elapsed < patience:
-                    elapsed += 1
-                    pass
-
             print(f'epoch: {epoch} {" ".join(metrics_strs)}')
 
         if elapsed == patience:
             print("Early stop run, no increase in test accuracy")
             elapsed = 0
             max_test_acc = 0
+            max_test_loss = 0
             break
 
         CsvUtils2.add_hparams(
