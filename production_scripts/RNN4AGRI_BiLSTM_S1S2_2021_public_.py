@@ -229,14 +229,6 @@ for g in tqdm(ParameterGrid(param_grid)):
         drop_last=True,
     )
 
-    class LossCrossEntropy(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def forward(self, y, y_prim):
-            return -torch.mean(y * torch.log(y_prim + 1e-20))
-
-
     class ModelBiLSTM(torch.nn.Module):
         def __init__(self, input_size, hidden_size, output_size, num_layers):
             super().__init__()
