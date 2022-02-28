@@ -195,26 +195,6 @@ for g in tqdm(ParameterGrid(param_grid)):
         DatasetTabular(is_train=True, sequence_len=args.sequence_len),
         [train_size, test_size])
 
-    # # Create a balanced testing dataset
-    # test_idx_dict = {}
-    # test_idxes = []
-    # leftover_idxes = []
-    #
-    # for i in range(0, len(test_dataset)):
-    #     class_id = test_dataset[i][1].item()
-    #     if class_id not in test_idx_dict.keys():
-    #         test_idx_dict[class_id] = 0
-    #         test_idxes.append(i)
-    #     elif class_id in test_idx_dict.keys() and test_idx_dict[class_id] < 300:
-    #         test_idx_dict[class_id] += 1
-    #         test_idxes.append(i)
-    #     else:
-    #         leftover_idxes.append(i)
-    #
-    # balanced_test_dataset = torch.utils.data.Subset(test_dataset, test_idxes)
-    # leftover_test_dataset = torch.utils.data.Subset(test_dataset, leftover_idxes)
-    # train_dataset = torch.utils.data.ConcatDataset([train_dataset, leftover_test_dataset])
-
     data_loader_train = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=args.batch_size,
